@@ -11,13 +11,14 @@
 ![Dataset: MazePlanning](https://img.shields.io/badge/Dataset-MazePlanning-FF8C00)
 
 
-<font size=7><div align='center' > [[🍎 Project Page](https://latent-sketchpad.github.io/)] [[📖 arXiv Paper](https://arxiv.org/abs/2510.24514)] [[🤗 Sketch Decoder · Checkpoint](https://huggingface.co/huanyu112/Latent-Sketchpad.Sketch_Decoder)] [[🤗 Dataset · Coming soon]()]  </div></font>
+<font size=7><div align='center' > [[🍎 Project Page](https://latent-sketchpad.github.io/)] [[📖 arXiv Paper](https://arxiv.org/abs/2510.24514)] [[🤗 Sketch Decoder · Checkpoint](https://huggingface.co/huanyu112/Latent-Sketchpad.Sketch_Decoder)] [[🤗 Dataset](https://huggingface.co/datasets/huanyu112/MazePlanning-Test)]  </div></font>
 
 
 ---
 
 ## 🔥 News
-* **`2025.10.29`** 🚀 Our paper **Latent Sketchpad: Sketching Visual Thoughts to Elicit Multimodal Reasoning in MLLMs** is now available on [arXiv](https://arxiv.org/abs/2501.xxxxx) together with the [code release](https://github.com/hwanyu112/Latent-Sketchpad). Latent Sketchpad ***extends frontier MLLMs (e.g., Gemma3 and Qwen2.5-VL) to interleave text and visual latents generation***, incorporating visual thoughts directly into reasoning.
+* **`2026.2.1`** 🚀 The test set of our Mazeplanning dataset is now available on [Huggingface](https://huggingface.co/datasets/huanyu112/MazePlanning-Test). 
+* **`2025.10.29`** 🚀 Our paper **Latent Sketchpad: Sketching Visual Thoughts to Elicit Multimodal Reasoning in MLLMs** is now available on [arXiv](https://arxiv.org/abs/2510.24514) together with the [code release](https://github.com/hwanyu112/Latent-Sketchpad). Latent Sketchpad ***extends frontier MLLMs (e.g., Gemma3 and Qwen2.5-VL) to interleave text and visual latents generation***, incorporating visual thoughts directly into reasoning.
 
 
 ## 👀 Contents
