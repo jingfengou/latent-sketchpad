@@ -9,7 +9,7 @@ OUTPUT_DIR="${1:-$LATENT_SKETCHPAD_ROOT/outputs/3dproject_stage1_qwen35_full_lfa
 mkdir -p "$WANDB_DIR"
 printf '[wandb] mode=%s disabled=%s dir=%s\n' "$WANDB_MODE" "$WANDB_DISABLED" "$WANDB_DIR"
 
-"/workspace/home/miniconda3/envs/${LATENT_SKETCHPAD_CONDA_ENV}/bin/deepspeed" \
+"$LATENT_SKETCHPAD_DEEPSPEED_BIN" \
   --num_gpus=2 \
   --master_port="$MASTER_PORT" \
   "$LATENT_SKETCHPAD_ROOT/train_qwen35.py" \

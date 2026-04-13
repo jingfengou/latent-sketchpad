@@ -9,7 +9,7 @@ SAMPLE_INDEX="${3:-0}"
 
 mkdir -p "$OUTPUT_DIR"
 
-"/workspace/home/miniconda3/envs/${LATENT_SKETCHPAD_CONDA_ENV}/bin/python" \
+"$LATENT_SKETCHPAD_PYTHON_BIN" \
   "$LATENT_SKETCHPAD_ROOT/inference_qwen35_stage2.py" \
   --model_path "$MODEL_PATH" \
   --decoder_path "$LATENT_SKETCHPAD_DECODER_PATH" \

@@ -17,7 +17,7 @@ from qwen35_utils import resolve_qwen35_attn_implementation
 
 LOCAL_QWEN35_PATH = os.environ.get(
     "LATENT_SKETCHPAD_QWEN35_PATH",
-    "/workspace/home/oujingfeng/project/models/Qwen3.5-4B",
+    "../models/Qwen3.5-4B",
 )
 
 

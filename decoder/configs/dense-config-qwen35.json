@@ -10,10 +10,10 @@
   "dataset": "quickdraw-344-classes",
   "use_quickdraw": true,
   "extra_image_json_files": [
-    "/workspace/home/oujingfeng/project/unimrg/datasets/spatialviz/latent_sketchpad_3dproject_currentstyle_3329/train.json",
-    "/workspace/home/oujingfeng/project/unimrg/datasets/spatialviz/latent_sketchpad_3dproject_currentstyle_3329/val.json"
+    "../../unimrg/datasets/spatialviz/latent_sketchpad_3dproject_currentstyle_3329/train.json",
+    "../../unimrg/datasets/spatialviz/latent_sketchpad_3dproject_currentstyle_3329/val.json"
   ],
-  "extra_image_root": "/workspace/home/oujingfeng/project/unimrg/datasets/spatialviz",
+  "extra_image_root": "../../unimrg/datasets/spatialviz",
   "cate_num": -1,
   "number_per_class": -1,
   "train_split": 0.999,
@@ -25,7 +25,7 @@
   "log_every_n_steps": 50,
   "num_workers": 4,
   "disable_eval": false,
-  "vision_model_name": "/workspace/home/oujingfeng/project/models/Qwen3.5-4B",
+  "vision_model_name": "../../models/Qwen3.5-4B",
   "image_size": 224,
   "layer": 12,
   "input_dim": 1024,

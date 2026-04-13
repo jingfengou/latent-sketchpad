@@ -33,6 +33,19 @@ numpy.random.seed(42)
 torch.set_float32_matmul_precision('high')
 
 
+def resolve_path(value, base_dir):
+    if not value:
+        return value
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return str(path)
+    return str((base_dir / path).resolve())
+
+
+def resolve_paths(values, base_dir):
+    return [resolve_path(value, base_dir) for value in values]
+
+
 def init_vae_encoder_from_ref(vae_encoder, vae_ref):
     ref_state = vae_ref.encoder.state_dict()
     target_state = vae_encoder.state_dict()
@@ -431,10 +444,17 @@ def main(args):
     # Check for environment variable for config file
     config_file_path = os.getenv('CONFIG_FILE_PATH', 'configs/dense-config-scratch.json')
 
+    config_base_dir = Path.cwd()
     if config_file_path and os.path.exists(config_file_path) and config_file_path.endswith('.json'):
+        config_base_dir = Path(config_file_path).resolve().parent
         with open(config_file_path, 'r') as f:
             config_from_file = json.load(f)
         default_config.update(config_from_file)
+
+    default_config['vision_model_name'] = resolve_path(default_config['vision_model_name'], config_base_dir)
+    default_config['extra_image_root'] = resolve_path(default_config.get('extra_image_root', ''), config_base_dir)
+    default_config['extra_image_json_files'] = resolve_paths(default_config.get('extra_image_json_files', []), config_base_dir)
+    default_config['pretrained_aligner_ckpt'] = resolve_path(default_config.get('pretrained_aligner_ckpt', ''), config_base_dir)
 
     batch_size = default_config['batch_size']
     learning_rate = default_config['learning_rate']

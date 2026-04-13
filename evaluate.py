@@ -24,7 +24,7 @@ import requests
 
 LOCAL_QWEN25_VL_PATH = os.environ.get(
     "LATENT_SKETCHPAD_QWEN_PATH",
-    "/workspace/home/oujingfeng/project/models/Qwen2.5-VL-7B-Instruct",
+    "../models/Qwen2.5-VL-7B-Instruct",
 )
 LOCAL_GEMMA3_PATH = os.environ.get(
     "LATENT_SKETCHPAD_GEMMA_PATH",
@@ -32,7 +32,7 @@ LOCAL_GEMMA3_PATH = os.environ.get(
 )
 LOCAL_IMAGE_ROOT = os.environ.get(
     "LATENT_SKETCHPAD_IMAGE_ROOT",
-    "/workspace/home/oujingfeng/project/unimrg/datasets/spatialviz",
+    "../unimrg/datasets/spatialviz",
 )
 
 ############################################

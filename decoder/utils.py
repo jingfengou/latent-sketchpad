@@ -1,7 +1,12 @@
-from PIL import Image, ImageDraw
 import numpy as np
 import random
 from enum import Enum
+
+
+def _require_pil():
+    from PIL import Image, ImageDraw
+
+    return Image, ImageDraw
 class Category(Enum):
     """Enumerates the categories in the dataset 'Quick, Draw!'"""
 
@@ -419,6 +424,7 @@ def draw_strokes(draw, start_x, start_y, factor, strokes, colors):
 #def draw_canvas(strokes, colors, factor=10, optimized_size = 224):
 def draw_canvas(strokes, colors, background = 'white', max_dim=224):
     """Draw strokes on a canvas with random padding, random starting positions, and controlled dimensions using get_factor."""
+    Image, ImageDraw = _require_pil()
     
     # Use the get_factor function to determine the appropriate scaling factor
     best_factor = get_factor(strokes, max_dim=max_dim)
@@ -452,6 +458,7 @@ def draw_canvas(strokes, colors, background = 'white', max_dim=224):
 
 def merge_canvas(image1, image2, mode='horizontal', background = 'white'):
     """Merge two images either horizontally or vertically."""
+    Image, _ = _require_pil()
     if mode == 'horizontal':
         merged_width = image1.width + image2.width
         merged_height = max(image1.height, image2.height)
@@ -468,6 +475,7 @@ def merge_canvas(image1, image2, mode='horizontal', background = 'white'):
 
 def choose_more_square_like(image1, image2, background = 'white'):
     """Choose the more square-like image between the horizontal and vertical combinations."""
+    Image, _ = _require_pil()
     # Combine horizontally
     merged_width_horizontal = image1.width + image2.width
     merged_height_horizontal = max(image1.height, image2.height)

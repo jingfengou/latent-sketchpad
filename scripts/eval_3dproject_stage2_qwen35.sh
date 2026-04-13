@@ -3,7 +3,7 @@ set -euo pipefail
 
 source "$(dirname "$0")/local_env_qwen35.sh"
 
-PYTHON_BIN="/workspace/home/miniconda3/envs/${LATENT_SKETCHPAD_CONDA_ENV}/bin/python"
+PYTHON_BIN="$LATENT_SKETCHPAD_PYTHON_BIN"
 
 WAIT_MODE=0
 if [[ "${1:-}" == "--wait" ]]; then

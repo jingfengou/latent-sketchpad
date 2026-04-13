@@ -12,12 +12,12 @@ STAGE1_MODEL_PATH="${LATENT_SKETCHPAD_QWEN35_STAGE1_PATH:-$LATENT_SKETCHPAD_ROOT
 mkdir -p "$WANDB_DIR"
 printf '[wandb] mode=%s disabled=%s dir=%s\n' "$WANDB_MODE" "$WANDB_DISABLED" "$WANDB_DIR"
 
-"/workspace/home/miniconda3/envs/${LATENT_SKETCHPAD_CONDA_ENV}/bin/deepspeed" \
+"$LATENT_SKETCHPAD_DEEPSPEED_BIN" \
   --num_gpus=2 \
   --master_port="$MASTER_PORT" \
   "$LATENT_SKETCHPAD_ROOT/train_stage2_qwen35.py" \
   --data_path "$LATENT_SKETCHPAD_SPATIALVIZ_MERGED_TRAIN" \
-  --image_dir "/workspace/home/oujingfeng/project" \
+  --image_dir "$LATENT_SKETCHPAD_IMAGE_DIR" \
   --decoder_path "$LATENT_SKETCHPAD_DECODER_PATH" \
   --model_path "$STAGE1_MODEL_PATH" \
   --learning_rate 1e-4 \

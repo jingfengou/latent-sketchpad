@@ -11,6 +11,6 @@ mkdir -p "$MOUNT_DIR"
 mkdir -p "$WANDB_DIR"
 printf '[wandb] mode=%s disabled=%s dir=%s\n' "$WANDB_MODE" "$WANDB_DISABLED" "$WANDB_DIR"
 
-"/workspace/home/miniconda3/envs/${LATENT_SKETCHPAD_CONDA_ENV}/bin/python" \
+"$LATENT_SKETCHPAD_PYTHON_BIN" \
   "$LATENT_SKETCHPAD_ROOT/decoder/train.py" \
   --gpus 2

@@ -28,7 +28,7 @@ cat > "$CONFIG_PATH" <<'EOF'
   "dense_align": true,
   "gray_image": true,
   "eval_every_n_steps": 1,
-  "vision_model_name": "/workspace/home/oujingfeng/project/models/Qwen3.5-4B",
+  "vision_model_name": "../models/Qwen3.5-4B",
   "image_size": 224,
   "layer": 2,
   "input_dim": 1024,
@@ -40,6 +40,6 @@ EOF
 CONFIG_FILE_PATH="$CONFIG_PATH" \
 MOUNT_DIR="$SMOKE_DIR" \
 DATA_DIR="$LATENT_SKETCHPAD_ROOT/decoder" \
-"/workspace/home/miniconda3/envs/${LATENT_SKETCHPAD_CONDA_ENV}/bin/python" \
+"$LATENT_SKETCHPAD_PYTHON_BIN" \
   "$LATENT_SKETCHPAD_ROOT/decoder/train.py" \
   --gpus 1

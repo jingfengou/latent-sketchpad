@@ -80,7 +80,7 @@ def download_one(folder: Path, timeout: int) -> tuple[str, int]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Download or repair QuickDraw data.full.npz files.')
-    parser.add_argument('--root', default='/workspace/home/oujingfeng/project/Latent-Sketchpad/decoder/QuickDraw')
+    parser.add_argument('--root', default=str(REPO_ROOT / 'decoder' / 'QuickDraw'))
     parser.add_argument('--workers', type=int, default=16)
     parser.add_argument('--timeout', type=int, default=120)
     parser.add_argument('--verify-only', action='store_true')

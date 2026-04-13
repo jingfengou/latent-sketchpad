@@ -6,11 +6,11 @@ source "$(dirname "$0")/local_env_qwen35.sh"
 OUTPUT_DIR="${1:-$LATENT_SKETCHPAD_ROOT/outputs/qwen35_stage2_smoke1_stable_from_stage1}"
 MASTER_PORT="${MASTER_PORT:-29636}"
 
-"/workspace/home/miniconda3/envs/${LATENT_SKETCHPAD_CONDA_ENV}/bin/deepspeed" \
+"$LATENT_SKETCHPAD_DEEPSPEED_BIN" \
   --num_gpus=2 \
   --master_port="$MASTER_PORT" \
   "$LATENT_SKETCHPAD_ROOT/train_stage2_qwen35.py" \
-  --data_path "/workspace/home/oujingfeng/project/unimrg/datasets/spatialviz/latent_sketchpad_3dproject_currentstyle_3329/train_smoke32.json" \
+  --data_path "$LATENT_SKETCHPAD_3DPROJECT_TRAIN_SMOKE32" \
   --image_dir "$LATENT_SKETCHPAD_IMAGE_ROOT" \
   --decoder_path "$LATENT_SKETCHPAD_DECODER_PATH" \
   --model_path "${LATENT_SKETCHPAD_QWEN35_STAGE1_PATH:-$LATENT_SKETCHPAD_QWEN35_PATH}" \

@@ -14,7 +14,7 @@ from qwen35_utils import resolve_qwen35_attn_implementation
 
 LOCAL_IMAGE_ROOT = os.environ.get(
     "LATENT_SKETCHPAD_IMAGE_ROOT",
-    "/workspace/home/oujingfeng/project/unimrg/datasets/spatialviz",
+    "../unimrg/datasets/spatialviz",
 )
 
 

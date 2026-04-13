@@ -6,7 +6,7 @@ source "$(dirname "$0")/local_env.sh"
 MASTER_PORT="${MASTER_PORT:-29624}"
 OUTPUT_DIR="${1:-$LATENT_SKETCHPAD_ROOT/outputs/3dproject_stage1_full_lora_e3_b16_lr5e5_noval}"
 
-"/workspace/home/miniconda3/envs/${LATENT_SKETCHPAD_CONDA_ENV}/bin/python" -m torch.distributed.run \
+"$LATENT_SKETCHPAD_PYTHON_BIN" -m torch.distributed.run \
   --nproc_per_node=2 \
   --master_port="$MASTER_PORT" \
   "$LATENT_SKETCHPAD_ROOT/train.py" \
