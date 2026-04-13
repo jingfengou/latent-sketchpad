@@ -1,18 +1,26 @@
-import torch
-import torch.optim as optim
-import torch.nn.functional as F
-from torch.utils.data import DataLoader, random_split
-from diffusers.models import AutoencoderKL
-import open_clip
-from torchvision import transforms
-from PIL import Image
-import os, sys, json
+import json
+import os
+import random
+import sys
+from collections import OrderedDict
+from pathlib import Path
+
 import lightning as L
-from lightning.pytorch.loggers import WandbLogger
+import numpy
+import open_clip
+import torch
+import torch.nn.functional as F
+import torch.optim as optim
+from diffusers.models import AutoencoderKL
+from PIL import Image
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.utilities import grad_norm
 from argparse import ArgumentParser
+from torch.utils.data import ConcatDataset, Dataset, random_split
+from torchvision import transforms
+
 sys.path.append(os.path.abspath(__file__))
 from vae_encoder import VaeEncoder  # Make sure to replace this with the actual path to your Encoder class definition
 from data.quickdraw import QuickDraw, Category
@@ -20,11 +28,21 @@ sys.path.append(os.path.join(os.path.abspath(os.path.dirname(__file__)), 'aligne
 from torchdata.stateful_dataloader import StatefulDataLoader
 from vision_encoder_wrapper import VisionTransformerWrapper
 
-import numpy, random
-
 random.seed(42)
 numpy.random.seed(42)
 torch.set_float32_matmul_precision('high')
+
+
+def init_vae_encoder_from_ref(vae_encoder, vae_ref):
+    ref_state = vae_ref.encoder.state_dict()
+    target_state = vae_encoder.state_dict()
+    copied = OrderedDict()
+    for key, value in target_state.items():
+        if key in ref_state and ref_state[key].shape == value.shape:
+            copied[key] = ref_state[key]
+        else:
+            copied[key] = value
+    vae_encoder.load_state_dict(copied, strict=False)
 
 # Custom Dataset Class
 class QuickDrawDualTransformDataset(QuickDraw):
@@ -68,6 +86,44 @@ class QuickDrawDualTransformDataset(QuickDraw):
 
     def __len__(self):
         return len(self.data)
+
+
+class SpatialImageDualTransformDataset(Dataset):
+    def __init__(self, json_files, image_root, transform_vit=None, transform_vae=None, image_size=224):
+        self.transform_vit = transform_vit
+        self.transform_vae = transform_vae
+        self.image_size = image_size
+        self.image_paths = []
+
+        root = Path(image_root)
+        for json_file in json_files:
+            with open(json_file, 'r', encoding='utf-8') as handle:
+                records = json.load(handle)
+            for record in records:
+                for key in ('input_img', 'label_img'):
+                    for rel_path in record.get(key, []):
+                        path = root / rel_path
+                        if path.exists():
+                            self.image_paths.append(path)
+
+        # Preserve insertion order while removing duplicates.
+        self.image_paths = list(dict.fromkeys(self.image_paths))
+        if not self.image_paths:
+            raise ValueError(f'No valid images found for SpatialImageDualTransformDataset under {image_root}.')
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, index):
+        image = Image.open(self.image_paths[index]).convert('RGB')
+        img_vit = self.transform_vit(image)
+        img_vae = self.transform_vae(image)
+
+        white_bg = torch.ones_like(img_vae)
+        black_bg = -torch.ones_like(img_vae)
+        bg_distance = torch.minimum((img_vae - white_bg).abs(), (img_vae - black_bg).abs())
+        mask = (bg_distance > 0.08).any(dim=0).float().unsqueeze(0).repeat(3, 1, 1)
+        return img_vit, img_vae, mask
 
 def focal_loss(input, target, foreground_mask, threshold = 0.1, focal_weight = 2):
     abs_diff = torch.abs(input - target)
@@ -134,13 +190,25 @@ class CustomCheckpointCallback(ModelCheckpoint):
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
-        if trainer.global_step % self.every_n_train_steps == 0:
-            reconstruct_image_OOD('test-abstract/maze.png', pl_module.image_size, pl_module.aligner_net, pl_module.vision_encoder, pl_module.vae_ref, pl_module.device, self.logger, trainer.global_step)
+        sample_path = 'test-abstract/maze.png'
+        if trainer.global_step % self.every_n_train_steps == 0 and os.path.exists(sample_path):
+            reconstruct_image_OOD(sample_path, pl_module.image_size, pl_module.aligner_net, pl_module.vision_encoder, pl_module.vae_ref, pl_module.device, self.logger, trainer.global_step)
 
 
 # Define LightningModule with W&B Logging
 class LitAlignerModel(L.LightningModule):
-    def __init__(self, aligner_net, vision_encoder, vae_encoder, vae_ref, learning_rate, need_dense, non_background_weight, image_size):
+    def __init__(
+        self,
+        aligner_net,
+        vision_encoder,
+        vae_encoder,
+        vae_ref,
+        learning_rate,
+        need_dense,
+        non_background_weight,
+        image_size,
+        log_every_n_steps,
+    ):
         super().__init__()
         self.aligner_net = aligner_net
         self.vision_encoder = vision_encoder
@@ -151,6 +219,7 @@ class LitAlignerModel(L.LightningModule):
         self.non_background_weight = non_background_weight
         self.validation_epoch_outputs = []
         self.image_size = image_size
+        self.log_every_n_steps = log_every_n_steps
 
 
     def forward(self, img_tokens, padding_mask, vae_embedding):
@@ -194,7 +263,17 @@ class LitAlignerModel(L.LightningModule):
                        'latent_loss': latent_loss, 
                        'embed_loss': embed_loss,
                        'image_loss': weighted_loss},
-                       logger=True)
+                       logger=True, on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
+
+        next_step = self.global_step + 1
+        if self.trainer.is_global_zero and self.log_every_n_steps and next_step % self.log_every_n_steps == 0:
+            print(
+                f"[aligner] step={next_step} train_loss={loss.detach().item():.4f} "
+                f"latent_loss={latent_loss.detach().item():.4f} "
+                f"embed_loss={embed_loss.detach().item():.4f} "
+                f"image_loss={weighted_loss.detach().item():.4f}",
+                flush=True,
+            )
 
         return loss
 
@@ -243,8 +322,51 @@ class LitAlignerModel(L.LightningModule):
         self.log('grad_norm_total', norms['grad_2.0_norm_total'], logger=True)
 
 # Prepare DataLoader
-def prepare_dataloaders(batch_size, train_ratio, val_ratio, num_workers, transform_vit, transform_vae, gray, cate_num, number_per_class, image_size):
-    dataset = QuickDrawDualTransformDataset(root=os.getenv('DATA_DIR', '.'), transform_vit=transform_vit, transform_vae=transform_vae, download=True, gray=gray, cate_num=cate_num, number_per_class=number_per_class, image_size=image_size)
+def prepare_dataloaders(
+    batch_size,
+    train_ratio,
+    val_ratio,
+    num_workers,
+    transform_vit,
+    transform_vae,
+    gray,
+    cate_num,
+    number_per_class,
+    image_size,
+    use_quickdraw=True,
+    extra_image_json_files=None,
+    extra_image_root=None,
+):
+    datasets = []
+    if use_quickdraw:
+        datasets.append(
+            QuickDrawDualTransformDataset(
+                root=os.getenv('DATA_DIR', '.'),
+                transform_vit=transform_vit,
+                transform_vae=transform_vae,
+                download=True,
+                gray=gray,
+                cate_num=cate_num,
+                number_per_class=number_per_class,
+                image_size=image_size,
+            )
+        )
+
+    if extra_image_json_files:
+        datasets.append(
+            SpatialImageDualTransformDataset(
+                json_files=extra_image_json_files,
+                image_root=extra_image_root or os.getenv('LATENT_SKETCHPAD_IMAGE_ROOT', '.'),
+                transform_vit=transform_vit,
+                transform_vae=transform_vae,
+                image_size=image_size,
+            )
+        )
+
+    if not datasets:
+        raise ValueError('No decoder training datasets configured.')
+
+    dataset = datasets[0] if len(datasets) == 1 else ConcatDataset(datasets)
     train_size = int(train_ratio * len(dataset))
     val_size = int(val_ratio * len(dataset))
     test_size = len(dataset) - train_size - val_size
@@ -294,6 +416,11 @@ def main(args):
         'dense_align': True,
         "gray_image": True,
         'eval_every_n_steps': 500,
+        'save_every_n_train_steps': 5000,
+        'use_quickdraw': True,
+        'extra_image_json_files': [],
+        'extra_image_root': '',
+        'pretrained_aligner_ckpt': '',
         'vision_model_name': 'qwen',
         'image_size': 224,
         'layer': 12,
@@ -319,6 +446,10 @@ def main(args):
     vision_model_name = default_config['vision_model_name']
     project_name = f"{vision_model_name.split('/')[0]}-{default_config['project_name']}"
     accumulate_grad_batches = default_config['accumulate_grad_batches']
+    disable_eval = default_config.get('disable_eval', False)
+    log_every_n_steps = default_config.get('log_every_n_steps', default_config['eval_every_n_steps'])
+    num_workers = default_config.get('num_workers', 0)
+    save_every_n_train_steps = default_config.get('save_every_n_train_steps', 5000)
 
     # Initialize W&B logger for PyTorch Lightning
     wandb_logger = WandbLogger(project=project_name, config=default_config)
@@ -341,7 +472,11 @@ def main(args):
         double_z=True,  # As per the VAE initialization, this is set to True
         mid_block_add_attention=vae_ref.config.mid_block_add_attention  # Ensure this matches the VAE setting
     )
-    vae_encoder.load_state_dict(torch.load(os.path.join(mount_root, 'vae-encoder.pth')))
+    vae_encoder_path = os.path.join(mount_root, 'vae-encoder.pth')
+    if os.path.exists(vae_encoder_path):
+        vae_encoder.load_state_dict(torch.load(vae_encoder_path))
+    else:
+        init_vae_encoder_from_ref(vae_encoder, vae_ref)
     vae_encoder.eval()
     for param in vae_encoder.parameters():
         param.requires_grad = False
@@ -356,22 +491,51 @@ def main(args):
         from gaussian_aligner import ClipToLatentAligner
     # Initialize your aligner model and custom encoder
     aligner_net = ClipToLatentAligner(vae_encoder, default_config['input_dim'], 512, grid_size, default_config['layer'], default_config['causal_mask'])
+    pretrained_aligner_ckpt = default_config.get('pretrained_aligner_ckpt', '')
+    if pretrained_aligner_ckpt:
+        checkpoint = torch.load(pretrained_aligner_ckpt, map_location='cpu')
+        state_dict = checkpoint.get('state_dict', checkpoint)
+        aligner_state = {
+            key[len('aligner_net.'):] if key.startswith('aligner_net.') else key: value
+            for key, value in state_dict.items()
+        }
+        aligner_net.load_state_dict(aligner_state, strict=False)
+        print(f'Loaded pretrained aligner checkpoint: {pretrained_aligner_ckpt}', flush=True)
 
     # Initialize LightningModule
-    model = LitAlignerModel(aligner_net, vision_encoder, vae_encoder, vae_ref, learning_rate, default_config['dense_align'], default_config['non_background_weight'], image_size)
+    model = LitAlignerModel(
+        aligner_net,
+        vision_encoder,
+        vae_encoder,
+        vae_ref,
+        learning_rate,
+        default_config['dense_align'],
+        default_config['non_background_weight'],
+        image_size,
+        log_every_n_steps,
+    )
     # Define Custom Checkpoint Callback
-    checkpoint_callback = CustomCheckpointCallback(
-        every_n_train_steps=default_config['eval_every_n_steps'],
+    checkpoint_kwargs = dict(
+        every_n_train_steps=save_every_n_train_steps,
         logger=wandb_logger,
         dirpath=upload_dir,
-        filename='clip-vae_aligner-{epoch:02d}-{step}-{val_loss:.2f}',
-        #save_top_k=-1,
-        #save_last='link',
-        save_top_k=10,              # keep only top 10 checkpoints
-        save_last='link',
-        monitor='val_loss',         # metric to monitor
-        mode='min', 
     )
+    if disable_eval:
+        checkpoint_callback = CustomCheckpointCallback(
+            filename='clip-vae_aligner-{epoch:02d}-{step}',
+            save_top_k=-1,
+            save_last='link',
+            **checkpoint_kwargs,
+        )
+    else:
+        checkpoint_callback = CustomCheckpointCallback(
+            filename='clip-vae_aligner-{epoch:02d}-{step}-{val_loss:.2f}',
+            save_top_k=10,
+            save_last='link',
+            monitor='val_loss',
+            mode='min',
+            **checkpoint_kwargs,
+        )
 
     # Trainer setup
     trainer = Trainer(
@@ -380,8 +544,8 @@ def main(args):
         num_nodes=args.nodes,
         logger=wandb_logger,  # Use the W&B logger
         callbacks=[checkpoint_callback],
-        val_check_interval=default_config['eval_every_n_steps'] * accumulate_grad_batches,
-        log_every_n_steps=default_config['eval_every_n_steps'],
+        val_check_interval=None if disable_eval else default_config['eval_every_n_steps'] * accumulate_grad_batches,
+        log_every_n_steps=log_every_n_steps,
         accelerator="gpu",
         strategy="ddp",
         deterministic=True,
@@ -399,15 +563,18 @@ def main(args):
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # Normalize to match CLIP's preprocessing
     ])
     train_loader, val_loader, test_loader = prepare_dataloaders(batch_size, default_config['train_split'], default_config['val_split'], 
-                                                                num_workers=0,
+                                                                num_workers=num_workers,
                                                                 transform_vit=vision_encoder.image_transform,
                                                                 transform_vae=transform_vae, 
                                                                 gray=default_config['gray_image'],
                                                                 cate_num=default_config['cate_num'],
                                                                 number_per_class=default_config['number_per_class'],
-                                                                image_size=image_size)
+                                                                image_size=image_size,
+                                                                use_quickdraw=default_config.get('use_quickdraw', True),
+                                                                extra_image_json_files=default_config.get('extra_image_json_files', []),
+                                                                extra_image_root=default_config.get('extra_image_root', ''))
     # Train model
-    trainer.fit(model, train_loader, val_loader, ckpt_path='last')
+    trainer.fit(model, train_loader, None if disable_eval else val_loader, ckpt_path='last')
 
 
 if __name__ == "__main__":

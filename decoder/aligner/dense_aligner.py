@@ -1,13 +1,18 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
+import os, sys
+
+TORCHSCALE_ROOT = os.path.join(os.path.dirname(os.path.dirname(__file__)), "torchscale")
+if TORCHSCALE_ROOT not in sys.path:
+    sys.path.append(TORCHSCALE_ROOT)
+
 from torchscale.architecture.encoder import Encoder
 from torchscale.architecture.decoder import Decoder
 from torchscale.architecture.config import EncoderDecoderConfig
 from torchscale.component.embedding import PositionalEmbedding
 from diffusers.models.autoencoders.vae import DiagonalGaussianDistribution
 from diffusers.models.modeling_outputs import AutoencoderKLOutput
-import os, sys
 import open_clip
 
 class ClipToLatentAligner(nn.Module):
@@ -74,6 +79,7 @@ class ClipToLatentAligner(nn.Module):
         return {'mse_loss': mse_loss, 'output':output}
 
     def encode(self, condition, padding_mask):
+        condition = condition.to(self.encoder_proj.embed_tokens.weight.dtype)
         condition = self.encoder_proj(
             src_tokens=condition,
             encoder_padding_mask=padding_mask,

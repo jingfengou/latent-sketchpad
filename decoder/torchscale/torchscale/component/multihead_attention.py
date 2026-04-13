@@ -8,7 +8,15 @@ import torch.nn.functional as F
 from torch import nn
 
 from .multiway_network import MultiwayWrapper
-from xformers.ops import memory_efficient_attention, LowerTriangularMask, MemoryEfficientAttentionCutlassOp
+try:
+    from xformers.ops import LowerTriangularMask, MemoryEfficientAttentionCutlassOp, memory_efficient_attention
+
+    XFORMERS_AVAILABLE = True
+except ImportError:
+    LowerTriangularMask = None
+    MemoryEfficientAttentionCutlassOp = None
+    memory_efficient_attention = None
+    XFORMERS_AVAILABLE = False
 from torch.nn import LayerNorm
 
 def rotate_every_two(x):
@@ -148,7 +156,7 @@ class MultiheadAttention(nn.Module):
                                                     self.scale_length)).to(q)
                 q = q * scale_attention.unsqueeze(-1)
 
-        if self.args.flash_attention and rel_pos is None and attn_mask is not None:
+        if self.args.flash_attention and XFORMERS_AVAILABLE and rel_pos is None and attn_mask is not None:
             attn_bias = LowerTriangularMask()
             attn = memory_efficient_attention(q, k, v, attn_bias, op=MemoryEfficientAttentionCutlassOp)
             attn_weights = None

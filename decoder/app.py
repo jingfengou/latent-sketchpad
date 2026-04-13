@@ -202,6 +202,11 @@ def parse_args():
         default=7860,
         help="Port number for the web server."
     )
+    parser.add_argument(
+        "--share",
+        action="store_true",
+        help="Create a public Gradio share URL. Disabled by default for local-only runs."
+    )
 
     return parser.parse_args()
 
@@ -236,12 +241,13 @@ if __name__ == "__main__":
 
     server_name = "127.0.0.1"
     share_token = secrets.token_urlsafe(32)
-    share_url = networking.setup_tunnel(
-        local_host=server_name,
-        local_port=args.port,
-        share_token=share_token,
-        share_server_address=None,
-        share_server_tls_certificate=None,
-    )
-    print(f"Share URL: {share_url}")
+    if args.share:
+        share_url = networking.setup_tunnel(
+            local_host=server_name,
+            local_port=args.port,
+            share_token=share_token,
+            share_server_address=None,
+            share_server_tls_certificate=None,
+        )
+        print(f"Share URL: {share_url}")
     uvicorn.run(app, host=server_name, port=args.port)

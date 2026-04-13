@@ -1,13 +1,13 @@
 import torch
 import os, sys, json
 import torch
-sys.path.append(os.path.abspath(__file__))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from visual import VisionTransformer
 from transformers import AutoProcessor
 import open_clip
 from transformers import AutoModel, CLIPImageProcessor
 from torchvision import transforms
-from transformers import AutoProcessor, Gemma3ForConditionalGeneration
+from transformers import AutoProcessor, Gemma3ForConditionalGeneration, Qwen2_5_VLForConditionalGeneration
 from qwen25_vision_encoder import Qwen2_5_VisionTransformer
 
 class VisionTransformerWrapper:
@@ -39,8 +39,15 @@ class VisionTransformerWrapper:
             for param in self.mm_projector.parameters():
                 param.requires_grad = False
             self.patches_per_image = int(model.config.vision_config.image_size // model.config.vision_config.patch_size)
-        elif self.model_name.startswith('Qwen/Qwen2.5'):
-            vision_encoder = Qwen2_5_VisionTransformer.from_pretrained("/path/to/visualizer/qwen2_5_visual")
+        elif self.model_name.startswith('Qwen/Qwen2.5') or 'Qwen2.5' in self.model_name:
+            model = Qwen2_5_VLForConditionalGeneration.from_pretrained(self.model_name, low_cpu_mem_usage=True, torch_dtype=torch.bfloat16)
+            vision_encoder = Qwen2_5_VisionTransformer(model.model.visual.config)
+            vision_encoder.load_state_dict(model.model.visual.state_dict(), strict=True)
+        elif self.model_name.startswith('Qwen/Qwen3.5') or 'Qwen3.5' in self.model_name:
+            from transformers import Qwen3_5ForConditionalGeneration
+
+            model = Qwen3_5ForConditionalGeneration.from_pretrained(self.model_name, low_cpu_mem_usage=True, torch_dtype=torch.bfloat16)
+            vision_encoder = model.model.visual
         else:
             raise ValueError(f"Unsupported model name: {self.model_name}")
         print(f'loading vision encoder: {self.model_name}')
@@ -65,10 +72,15 @@ class VisionTransformerWrapper:
         return normed_vision_outputs.type_as(vision_outputs)
 
     def encode_image(self, input_tensor):
-        if self.model_name.startswith('Qwen/Qwen2.5'):
+        if self.model_name.startswith('Qwen/Qwen2.5') or 'Qwen2.5' in self.model_name:
             image_grid_thw = torch.tensor([[ input_tensor.size(0), 32, 32]]).to(self.vision_encoder.device)
-            img_tokens = self.vision_encoder(input_tensor.to(torch.float16), image_grid_thw)
-            img_tokens = img_tokens.reshape(input_tensor.size(0), -1, img_tokens.size(-1))
+            vision_outputs = self.vision_encoder(input_tensor.to(torch.float16), image_grid_thw)
+            hidden_states = vision_outputs.last_hidden_state if hasattr(vision_outputs, 'last_hidden_state') else vision_outputs
+            img_tokens = hidden_states.reshape(input_tensor.size(0), -1, hidden_states.size(-1))
+        elif self.model_name.startswith('Qwen/Qwen3.5') or 'Qwen3.5' in self.model_name:
+            image_grid_thw = torch.tensor([[input_tensor.size(0), 28, 28]], device=self.vision_encoder.device)
+            vision_outputs = self.vision_encoder(input_tensor.to(torch.float16), image_grid_thw)
+            img_tokens = vision_outputs.last_hidden_state.reshape(input_tensor.size(0), -1, vision_outputs.last_hidden_state.size(-1))
         elif self.model_name.lower().startswith('openclip'):
             img_tokens = self.vision_encoder.visual(input_tensor)[1]
         elif self.model_name.startswith('google/gemma-3'):
@@ -83,8 +95,8 @@ class VisionTransformerWrapper:
         return img_tokens
     
     def get_processor(self):
-        if self.model_name.startswith('Qwen/Qwen2.5'):
-            processor = AutoProcessor.from_pretrained("Qwen/Qwen2.5-VL-7B-Instruct")
+        if self.model_name.startswith('Qwen/Qwen2.5') or 'Qwen2.5' in self.model_name:
+            processor = AutoProcessor.from_pretrained(self.model_name)
             import torchvision.transforms.functional as F
             from PIL import Image
             return lambda images: processor.image_processor(
@@ -92,6 +104,15 @@ class VisionTransformerWrapper:
                 return_tensors='pt', 
                 do_resize=False
                 )['pixel_values'].squeeze(0)
+        elif self.model_name.startswith('Qwen/Qwen3.5') or 'Qwen3.5' in self.model_name:
+            processor = AutoProcessor.from_pretrained(self.model_name)
+            import torchvision.transforms.functional as F
+            from PIL import Image
+            return lambda images: processor.image_processor(
+                F.resize(images if isinstance(images, Image.Image) else Image.fromarray(images), (448, 448)),
+                return_tensors='pt',
+                do_resize=False,
+            )['pixel_values'].squeeze(0)
         elif self.model_name.lower().startswith('openclip'):
             #return self.clip_processor
             return transforms.Compose([
@@ -110,5 +131,3 @@ class VisionTransformerWrapper:
             return lambda images: processor(images=images, return_tensors='pt', **images_kwargs)['pixel_values'].squeeze(0)
         else:
             raise ValueError(f"Unsupported model name: {self.model_name}")
-
-

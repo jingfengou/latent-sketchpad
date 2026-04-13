@@ -19,6 +19,20 @@ from model.uni_qwen import UniQwenForConditionalGeneration
 from model.uni_gemma import GemmaGenForConditionalGeneration
 from gen_utils import untie_embeddings
 
+
+LOCAL_QWEN25_VL_PATH = os.environ.get(
+    "LATENT_SKETCHPAD_QWEN_PATH",
+    "/workspace/home/oujingfeng/project/models/Qwen2.5-VL-7B-Instruct",
+)
+LOCAL_GEMMA3_PATH = os.environ.get(
+    "LATENT_SKETCHPAD_GEMMA_PATH",
+    "/path/to/gemma-3-12b-it",
+)
+LOCAL_IMAGE_ROOT = os.environ.get(
+    "LATENT_SKETCHPAD_IMAGE_ROOT",
+    "/workspace/home/oujingfeng/project/unimrg/datasets/spatialviz",
+)
+
 def main():
     parser = argparse.ArgumentParser(description="Multimodal Model Evaluation using Trainer")
     parser.add_argument("--model_path", type=str, help="Path to the model checkpoint")
@@ -45,7 +59,7 @@ def main():
     if "gemma" in args.model_path.lower(): 
         model_name = "gemma"
         if os.path.exists(args.model_path):
-            shutil.copy('/path/to/gemma-3-12b-it/preprocessor_config.json', args.model_path)
+            shutil.copy(os.path.join(LOCAL_GEMMA3_PATH, "preprocessor_config.json"), args.model_path)
 
         model = GemmaGenForConditionalGeneration.from_pretrained(
             args.model_path,
@@ -56,7 +70,7 @@ def main():
     elif "qwen" in args.model_path.lower():
         model_name = "qwen"
         if os.path.exists(args.model_path):
-            shutil.copy('/path/to/Qwen2.5-VL-7B-Instruct/preprocessor_config.json', args.model_path)
+            shutil.copy(os.path.join(LOCAL_QWEN25_VL_PATH, "preprocessor_config.json"), args.model_path)
     
         model = UniQwenForConditionalGeneration.from_pretrained(
             args.model_path,
@@ -67,9 +81,9 @@ def main():
     aligner_net, vae_ref = load_models(model.device, args.decoder_path, feature_dim=model.config.vision_config.hidden_size)
     model.eval()
     print(f"Model loaded from {args.model_path}")
-    tokenizer = AutoTokenizer.from_pretrained("/path/to/gemma-3-12b-it" if model_name == "gemma" else "/path/to/Qwen2.5-VL-7B-Instruct")
-    processor = AutoProcessor.from_pretrained("/path/to/gemma-3-12b-it" if model_name == "gemma" else "/path/to/Qwen2.5-VL-7B-Instruct")
-    test_dataset = MultimodalEvalDataset(tokenizer, processor, args.data_path, image_dir="/path/to/reasoning_maze/", is_original_model=False, model_name=model_name)   
+    tokenizer = AutoTokenizer.from_pretrained(LOCAL_GEMMA3_PATH if model_name == "gemma" else LOCAL_QWEN25_VL_PATH)
+    processor = AutoProcessor.from_pretrained(LOCAL_GEMMA3_PATH if model_name == "gemma" else LOCAL_QWEN25_VL_PATH)
+    test_dataset = MultimodalEvalDataset(tokenizer, processor, args.data_path, image_dir=LOCAL_IMAGE_ROOT, is_original_model=False, model_name=model_name)
     print(f"Loaded {len(test_dataset)} samples from {args.data_path}")
 
     batch = test_dataset[1]

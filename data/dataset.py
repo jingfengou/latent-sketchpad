@@ -3,6 +3,11 @@ import os
 import io
 import base64
 import re
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(__file__)), "decoder", "torchscale"))
+
 import torch
 import random
 from PIL import Image
@@ -14,8 +19,6 @@ from torch.nn.utils.rnn import pad_sequence
 # from qwen_vl_utils import process_vision_info
 from typing import Dict, List, Optional, Union, Any
 import requests
-import sys
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from gen_utils import left_padding
 
 sep_token = "<unused6>"
@@ -25,6 +28,7 @@ BOI_TOKEN_Qwen = "<|vision_start|><|image_pad|><|vision_end|>"
 IMAGE_SIZE = 224
 GRID_SIZE = IMAGE_SIZE // 8
 LAYERS = 12
+QWEN_IMAGE_TOKEN_COUNT = 196
 
 def find_subseq(haystack: torch.Tensor, needle: list[int]) -> int:
     """
@@ -53,6 +57,41 @@ def _remove_all_image_tokens(text: str) -> str:
     """删除文本中所有 <image>。"""
     return re.sub(r"<image>", "", text)
 
+
+def _split_label_text_by_image(text: str) -> list[str]:
+    parts = text.split("<image>")
+    segments = []
+    for index in range(len(parts) - 1):
+        segments.append(parts[index] + "<image>")
+    if parts:
+        segments.append(parts[-1])
+    return segments
+
+
+def _chunk_stage2_item(item: dict, chunk_size: int) -> list[dict]:
+    label_imgs = item.get("label_img", [])
+    if chunk_size <= 0 or len(label_imgs) <= chunk_size:
+        return [item]
+
+    segments = _split_label_text_by_image(item["label_text"])
+    image_segment_count = len(label_imgs)
+    prefix_segments = segments[:image_segment_count]
+    suffix_segments = segments[image_segment_count:]
+    chunked_items = []
+
+    for start in range(0, image_segment_count, chunk_size):
+        end = min(start + chunk_size, image_segment_count)
+        kept_segments = prefix_segments[:end] + suffix_segments
+        chunked = dict(item)
+        chunked["label_text"] = "".join(kept_segments)
+        chunked["label_img"] = label_imgs[:end]
+        chunked["_stage2_label_context_images"] = start
+        chunked["_stage2_label_chunk_end"] = end
+        chunked["_stage2_chunk_size"] = chunk_size
+        chunked_items.append(chunked)
+
+    return chunked_items
+
 def load_image(image_path: str, image_size: int = 896):
     try:
         if image_path.startswith('http'):
@@ -78,14 +117,15 @@ def decode_img(image_features, aligner_net, vae_ref, device):
         
     return tensor.cpu()
 
-def load_models(device, checkpoint_path, feature_dim):
+def load_models(device, checkpoint_path, feature_dim, strict=True):
     vae_ref = AutoencoderKL.from_pretrained("stabilityai/sdxl-vae").to(device)
     vae_ref.eval()
 
     aligner_net = ClipToLatentAligner(None, feature_dim, 512, GRID_SIZE, LAYERS).to(device)
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    state_dict = {k.replace('aligner_net.', ''): v for k, v in checkpoint['state_dict'].items()}
-    aligner_net.load_state_dict(state_dict)
+    if checkpoint_path:
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        state_dict = {k.replace('aligner_net.', ''): v for k, v in checkpoint['state_dict'].items()}
+        aligner_net.load_state_dict(state_dict, strict=strict)
     aligner_net.eval()
 
     return aligner_net, vae_ref
@@ -141,15 +181,25 @@ class MultimodalDataset(Dataset):
         self.model = model
         self.augment = augment
         self.stage1 = stage1
-        aligner_net, vae_ref = load_models(model.device, checkpoint_path, feature_dim)
-        self.aligner_net = aligner_net
-        self.vae_ref = vae_ref
+        self.aligner_net = None
+        self.vae_ref = None
+        if self.augment:
+            aligner_net, vae_ref = load_models(model.device, checkpoint_path, feature_dim)
+            self.aligner_net = aligner_net
+            self.vae_ref = vae_ref
         self.device = model.device
         self.model_name = model_name
         self.image_token_index = image_token_index.cpu()
         self.boi_id = boi_id
         self.eoi_id = eoi_id
         self.ignore_image = ignore_image
+        self.stage2_chunk_size = 3 if not stage1 else 0
+
+        if not self.stage1 and self.stage2_chunk_size > 0:
+            expanded = []
+            for item in self.data:
+                expanded.extend(_chunk_stage2_item(item, self.stage2_chunk_size))
+            self.data = expanded
 
         if "gemma" in model_name.lower():
             self.boi_token = BOI_TOKEN_Gemma3
@@ -242,6 +292,13 @@ class MultimodalDataset(Dataset):
         labels[labels==self.eoi_id] = IGNORE_INDEX
         if self.ignore_image:
             labels[labels==self.image_token_index] = IGNORE_INDEX
+
+        context_label_images = int(item.get("_stage2_label_context_images", 0))
+        if context_label_images > 0 and not self.stage1:
+            context_image_tokens = context_label_images * QWEN_IMAGE_TOKEN_COUNT
+            image_positions = (labels == self.image_token_index).nonzero(as_tuple=False).flatten()
+            if context_image_tokens > 0 and image_positions.numel() >= context_image_tokens:
+                labels[image_positions[:context_image_tokens]] = IGNORE_INDEX
 
         if text_dict['pixel_values'].shape[0] == 0:
             raise ValueError(f"Empty image tensor for index {idx}, {len(input_images)} images found.")

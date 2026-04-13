@@ -21,6 +21,20 @@ from model.uni_qwen import UniQwenForConditionalGeneration, Qwen2_5_VLForConditi
 from evaluator import text_evaluator, image_evaluator, evaluate_layout
 import requests
 
+
+LOCAL_QWEN25_VL_PATH = os.environ.get(
+    "LATENT_SKETCHPAD_QWEN_PATH",
+    "/workspace/home/oujingfeng/project/models/Qwen2.5-VL-7B-Instruct",
+)
+LOCAL_GEMMA3_PATH = os.environ.get(
+    "LATENT_SKETCHPAD_GEMMA_PATH",
+    "/path/to/gemma-3-12b-it",
+)
+LOCAL_IMAGE_ROOT = os.environ.get(
+    "LATENT_SKETCHPAD_IMAGE_ROOT",
+    "/workspace/home/oujingfeng/project/unimrg/datasets/spatialviz",
+)
+
 ############################################
 # Evaluation Functions: Text and Image Eval
 ############################################
@@ -165,7 +179,7 @@ def text_evaluation(
     with open(os.path.join(output_dir, "results_by_size.json"), "w", encoding="utf-8") as f:
         json.dump(size_avg, f, ensure_ascii=False, indent=2)
 
-def image_evaluation(json_file, image_evaluator, output_dir, label_file, images_dir, path_prefix="/path/to/reasoning_maze/"):
+def image_evaluation(json_file, image_evaluator, output_dir, label_file, images_dir, path_prefix=LOCAL_IMAGE_ROOT + "/"):
     """
     Evaluate generated images by reading their paths from a JSON file.
     
@@ -410,7 +424,7 @@ def save_and_concat_images(
     aligner_net,
     vae_ref,
     device: torch.device,
-    dataset_root: str = "/path/to/reasoning_maze"
+    dataset_root: str = LOCAL_IMAGE_ROOT
 ) -> Dict[str, Any]:
     os.makedirs(images_dir, exist_ok=True)
     with open(label_file, "r", encoding="utf-8") as lf:
@@ -570,7 +584,7 @@ def main():
                 is_original_model = True
             else:
                 if os.path.exists(args.model_path):
-                    shutil.copy('/path/to/gemma-3-12b-it/preprocessor_config.json', args.model_path)
+                    shutil.copy(os.path.join(LOCAL_GEMMA3_PATH, "preprocessor_config.json"), args.model_path)
         
                 model = GemmaGenForConditionalGeneration.from_pretrained(
                     args.model_path,
@@ -593,7 +607,7 @@ def main():
             else:
                 is_original_model = False
                 if os.path.exists(args.model_path):
-                    shutil.copy('/path/to/Qwen2.5-VL-7B-Instruct/preprocessor_config.json', args.model_path)
+                    shutil.copy(os.path.join(LOCAL_QWEN25_VL_PATH, "preprocessor_config.json"), args.model_path)
                 
                 model = UniQwenForConditionalGeneration.from_pretrained(
                     args.model_path,
@@ -606,9 +620,9 @@ def main():
         aligner_net, vae_ref = load_models(model.device, args.decoder_path, feature_dim=model.config.vision_config.hidden_size)
         model.eval()
         print(f"Model loaded from {args.model_path}")
-        tokenizer = AutoTokenizer.from_pretrained("/path/to/gemma-3-12b-it" if model_name == "gemma" else "/path/to/Qwen2.5-VL-7B-Instruct")
-        processor = AutoProcessor.from_pretrained("/path/to/gemma-3-12b-it" if model_name == "gemma" else "/path/to/Qwen2.5-VL-7B-Instruct")
-        test_dataset = MultimodalEvalDataset(tokenizer, processor, args.data_path, image_dir="/path/to/reasoning_maze/", is_original_model=is_original_model, model_name=model_name)   
+        tokenizer = AutoTokenizer.from_pretrained(LOCAL_GEMMA3_PATH if model_name == "gemma" else LOCAL_QWEN25_VL_PATH)
+        processor = AutoProcessor.from_pretrained(LOCAL_GEMMA3_PATH if model_name == "gemma" else LOCAL_QWEN25_VL_PATH)
+        test_dataset = MultimodalEvalDataset(tokenizer, processor, args.data_path, image_dir=LOCAL_IMAGE_ROOT, is_original_model=is_original_model, model_name=model_name)
         print(f"Loaded {len(test_dataset)} samples from {args.data_path}")
         
         run_evaluation(
@@ -634,7 +648,7 @@ def main():
     #####################################
     text_evaluation(json_output_path, text_evaluator, args.output_dir, args.data_path)
     if not args.text_only:
-        image_evaluation(json_output_path, image_evaluator, args.output_dir, args.data_path, images_dir)
+        image_evaluation(json_output_path, image_evaluator, args.output_dir, args.data_path, images_dir, path_prefix=LOCAL_IMAGE_ROOT + "/")
     
 
 if __name__ == "__main__":

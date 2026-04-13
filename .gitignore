@@ -4,3 +4,10 @@
 *.pyc
 **/wandb/
 **/__pycache__/
+.gradio/
+outputs/
+tmp/
+decoder/QuickDraw/
+*.log
+*.part
+微信图片_*.png

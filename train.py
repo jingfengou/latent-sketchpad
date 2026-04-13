@@ -26,6 +26,16 @@ import sys, os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from gen_utils import left_padding
 
+
+LOCAL_QWEN25_VL_PATH = os.environ.get(
+    "LATENT_SKETCHPAD_QWEN_PATH",
+    "/workspace/home/oujingfeng/project/models/Qwen2.5-VL-7B-Instruct",
+)
+LOCAL_GEMMA3_PATH = os.environ.get(
+    "LATENT_SKETCHPAD_GEMMA_PATH",
+    "/path/to/gemma-3-12b-it",
+)
+
 torch.autograd.set_detect_anomaly(True)
 
 def count_trainable_params(model):
@@ -63,6 +73,13 @@ def main():
         type=str,
         required=True,
         help="Path to the image directory."
+    )
+    parser.add_argument(
+        "--eval_data_path",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Optional path(s) to a dedicated evaluation file. If set, no random validation split is used.",
     )
     parser.add_argument(
         "--ds_config",
@@ -120,6 +137,7 @@ def main():
     parser.add_argument('--image-logits-only', action="store_true", default=False, help="whether to only fine-tune image logits")
     parser.add_argument('--per_device_eval_batch_size', type=int, default=4, help="Batch size per device during evaluation.")
     parser.add_argument('--eval_metric_for_best_model', type=str, default="eval_loss", help="Metric for best model.")
+    parser.add_argument('--disable_eval', action="store_true", default=False, help="Disable evaluation during training.")
     parser.add_argument('--no-sample', action="store_true", default=False, help="whether to do turn off sampling during generation")
     parser.add_argument('--wo-image-logits', action="store_true", default=False, help="whether to freeze image logits in lm_head")
     parser.add_argument('--use-lora', action="store_true", default=False, help="whether to use lora")
@@ -216,9 +234,9 @@ def main():
     if "stage2" in args.output_dir:
         ignore_image = False
         if model_name == "qwen":
-            shutil.copy('/path/to/Qwen2.5-VL-7B-Instruct/preprocessor_config.json', args.model_path)
+            shutil.copy(os.path.join(LOCAL_QWEN25_VL_PATH, "preprocessor_config.json"), args.model_path)
         elif model_name == "gemma":
-            shutil.copy('/path/to/gemma-3-12b-it/preprocessor_config.json', args.model_path)
+            shutil.copy(os.path.join(LOCAL_GEMMA3_PATH, "preprocessor_config.json"), args.model_path)
     else:
         ignore_image = True
 
@@ -248,7 +266,6 @@ def main():
 
         )
         model = get_peft_model(model, lora_config)
-        model = model.merge_and_unload()
         print("LoRA fine-tuning is enabled.")
 
     modules = set()
@@ -268,9 +285,9 @@ def main():
     processor = AutoProcessor.from_pretrained(args.model_path)
 
     ###########################################################################
-    # Load and split the dataset into training and evaluation sets.
+    # Load training and evaluation data.
     ###########################################################################
-    full_dataset = MultimodalDataset(
+    train_dataset = MultimodalDataset(
         tokenizer, processor, model, 
         json_file=args.data_path, 
         image_dir=args.image_dir, 
@@ -284,14 +301,42 @@ def main():
         eoi_id=model.config.eoi_token_index if model_name == "gemma" else model.config.vision_end_token_id,
         ignore_image=ignore_image
         )
-    dataset_size = len(full_dataset)
-    eval_size = int(dataset_size * args.validation_split)
-    train_size = dataset_size - eval_size
-    if train_size <= 0 or eval_size <= 0:
-        raise ValueError("Invalid split: Adjust --validation_split so both splits have at least one example.")
+    train_size = len(train_dataset)
+    if args.eval_data_path:
+        eval_dataset = MultimodalDataset(
+            tokenizer,
+            processor,
+            model,
+            json_file=args.eval_data_path,
+            image_dir=args.image_dir,
+            checkpoint_path=args.decoder_path,
+            feature_dim=model.config.vision_config.hidden_size,
+            augment=False,
+            stage1=args.stage1,
+            model_name=model_name,
+            image_token_index=image_token_index,
+            boi_id=model.config.boi_token_index if model_name == "gemma" else model.config.vision_start_token_id,
+            eoi_id=model.config.eoi_token_index if model_name == "gemma" else model.config.vision_end_token_id,
+            ignore_image=ignore_image,
+        )
+        eval_size = len(eval_dataset)
+        print(f"Train dataset size: {train_size} | Eval dataset size: {eval_size} (from dedicated eval file)")
+    else:
+        dataset_size = train_size
+        eval_size = int(dataset_size * args.validation_split)
+        train_size = dataset_size - eval_size
+        if train_size <= 0 or eval_size <= 0:
+            raise ValueError("Invalid split: Adjust --validation_split so both splits have at least one example.")
+        train_dataset, eval_dataset = random_split(train_dataset, [train_size, eval_size])
+        print(f"Total dataset size: {dataset_size} | Train: {train_size} | Eval: {eval_size}")
 
-    train_dataset, eval_dataset = random_split(full_dataset, [train_size, eval_size])
-    print(f"Total dataset size: {dataset_size} | Train: {train_size} | Eval: {eval_size}")
+    report_to = ["wandb"]
+    if os.environ.get("WANDB_DISABLED", "").lower() in {"true", "1", "yes"}:
+        report_to = []
+
+    deepspeed_config = args.ds_config if args.ds_config else None
+    eval_strategy = "no" if args.disable_eval else "steps"
+    load_best_model_at_end = not args.disable_eval
 
     # Define training arguments. Note the "report_to" parameter is set to ["wandb"].
     training_args = TrainingArguments(
@@ -304,21 +349,21 @@ def main():
         save_steps=args.save_steps,
         save_total_limit=20,
         bf16=True,  # Set to True if your hardware supports bf16; otherwise, consider fp16=True.
-        eval_strategy="steps",  # Enable evaluation.
-        eval_steps=args.eval_steps,
+        eval_strategy=eval_strategy,
+        eval_steps=args.eval_steps if not args.disable_eval else None,
         local_rank=args.local_rank,  # Enables distributed training.
-        report_to=["wandb"],  # Enable wandb logging.
+        report_to=report_to,  # Enable wandb logging unless explicitly disabled.
         # You could also process extra args here if needed.
         #fsdp="full_shard",
-        deepspeed=args.ds_config,  # Path to DeepSpeed config file        
+        deepspeed=deepspeed_config,  # Path to DeepSpeed config file
         gradient_checkpointing=True,
         max_grad_norm=args.max_grad_norm,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         weight_decay=args.weight_decay,
         lr_scheduler_type=args.lr_scheduler,
-        metric_for_best_model=args.eval_metric_for_best_model,
+        metric_for_best_model=args.eval_metric_for_best_model if not args.disable_eval else None,
         greater_is_better=False,
-        load_best_model_at_end=True,
+        load_best_model_at_end=load_best_model_at_end,
         seed=args.seed,
         per_device_eval_batch_size = args.per_device_eval_batch_size,
         batch_eval_metrics=True,
@@ -342,7 +387,7 @@ def main():
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
+        eval_dataset=None if args.disable_eval else eval_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
         image_loss_weight=args.image_loss_weight,

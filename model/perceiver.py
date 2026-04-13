@@ -27,7 +27,7 @@ def FeedForward(dim, mult = 4, dropout = 0.):
 class RotaryEmbedding(nn.Module):
     def __init__(self, dim):
         super().__init__()
-        inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2).float() / dim)).to(torch.bfloat16)
+        inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2).float() / dim))
         self.register_buffer("inv_freq", inv_freq)
 
     def forward(self, max_seq_len, *, device):
@@ -43,6 +43,8 @@ def rotate_half(x):
 
 
 def apply_rotary_pos_emb(pos, t):
+    pos = pos.to(torch.float32)
+    t = t.to(torch.float32)
     seq_len, rotate_dim = t.shape[-2], pos.shape[-1]
     pos = pos[..., -seq_len:, :]
     t, t_pass = t[..., :rotate_dim], t[..., rotate_dim:]
@@ -71,10 +73,15 @@ class CausalAttention(nn.Module):
         self.to_out = nn.Linear(inner_dim, dim, bias = False)
 
     def forward(self, x, rotary_pos_emb = None):
+        x = x.to(self.norm.weight.dtype)
         x = self.norm(x)
 
         q, k, v = self.to_qkv(x).chunk(3, dim = -1)
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), (q, k, v))
+
+        q = q.float()
+        k = k.float()
+        v = v.float()
 
         q = q * self.scale
 
@@ -88,13 +95,14 @@ class CausalAttention(nn.Module):
         causal_mask = torch.ones((i, j), device = x.device, dtype = torch.bool).triu(j - i + 1)
         sim = sim.masked_fill(causal_mask, -torch.finfo(sim.dtype).max)
 
-        attn = sim.softmax(dim = -1)
+        attn = sim.softmax(dim = -1, dtype = torch.float32).to(sim.dtype)
         attn = self.dropout(attn)
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
 
 
         out = rearrange(out, 'b h n d -> b n (h d)')
+        out = out.to(self.to_out.weight.dtype)
         return self.to_out(out)
 
 class CausalPrefixAttention(nn.Module):
@@ -127,6 +135,9 @@ class CausalPrefixAttention(nn.Module):
 
     def forward(self, x, context, context_mask = None, rotary_pos_emb = None):
         batch, context_len, device = x.shape[0], context.shape[-2], x.device
+        norm_dtype = self.norm.weight.dtype
+        x = x.to(norm_dtype)
+        context = context.to(norm_dtype)
 
         q_rotary_pos_emb = rotary_pos_emb
         k_rotary_pos_emb = rotary_pos_emb
@@ -170,6 +181,10 @@ class CausalPrefixAttention(nn.Module):
 
         q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h = self.heads), (q, k, v))
 
+        q = q.float()
+        k = k.float()
+        v = v.float()
+
         q = q * self.scale
 
         # rotate queries and keys with rotary embeddings
@@ -205,7 +220,7 @@ class CausalPrefixAttention(nn.Module):
 
             sim = sim.masked_fill(causal_mask, mask_value)
 
-            attn = sim.softmax(dim = -1)
+            attn = sim.softmax(dim = -1, dtype = torch.float32).to(sim.dtype)
             attn = self.dropout(attn)
 
             out_chunk = einsum('b h i j, b h j d -> b h i d', attn, v_chunk)
@@ -218,6 +233,7 @@ class CausalPrefixAttention(nn.Module):
         # merge heads and then combine with linear
 
         out = rearrange(out, 'b h n d -> b n (h d)')
+        out = out.to(self.to_out.weight.dtype)
 
         return self.to_out(out)
 
