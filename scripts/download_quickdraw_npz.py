@@ -11,7 +11,8 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.append('/workspace/home/oujingfeng/project/Latent-Sketchpad/decoder')
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / 'decoder'))
 from utils import Category  # noqa: E402
 
 
