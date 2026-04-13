@@ -21,6 +21,36 @@ It is based on the currently active environment in this workspace and should be 
 - Torch CUDA runtime: `12.8`
 - cuDNN: `91900`
 
+## If The Target Server Has No CUDA
+
+If the remote server does not have a CUDA-capable GPU available, then it should not be treated as a full training server for the current workflow.
+
+What will not be practical on a no-CUDA server:
+
+- Qwen3.5 stage1 training
+- Qwen3.5 stage2 training
+- decoder-aligner training
+- multi-image Qwen evaluation at normal speed
+- installing and using CUDA-dependent extensions such as `flash-attention`
+
+What is still reasonable on a no-CUDA server:
+
+- cloning and versioning the repository
+- editing code and scripts
+- preparing JSON datasets and path mappings
+- documentation work
+- lightweight sanity checks that do not require model execution on GPU
+- downloading or organizing non-model assets
+
+Recommended split if you have both GPU and non-GPU machines:
+
+- Use the non-CUDA server as a code/data preparation machine.
+- Use a CUDA server as the actual training/inference machine.
+- Sync code through GitHub.
+- Sync large datasets/models separately with `rsync`, object storage, or shared mounts.
+
+If the target machine has no CUDA and no NVIDIA GPU, you should skip CUDA toolkit and `flash-attention` setup entirely for that machine.
+
 ## Exact Package Versions
 
 The following versions were read from the current training environment.
